@@ -69,7 +69,7 @@ def show(database, objects):
     return True
 
 
-def disable(database, alias):
+def disable_alias(database, alias):
     """
     Disable virtual alias
     """
@@ -93,7 +93,7 @@ def disable(database, alias):
         return False
 
 
-def enable(database, alias):
+def enable_alias(database, alias):
     """
     Enable virtual alias
     """
@@ -110,10 +110,59 @@ def enable(database, alias):
                "WHERE source = '{}'".format(alias)
     result = db.query(db_query)
     if result.rowcount:
-        print "Enabled virtual alias " + alias
+        print 'Enabled virtual alias ' + alias
         return True
     else:
-        print "Failed to enable virtual alias " + alias
+        print 'Failed to enable virtual alias ' + alias
+        return False
+
+
+def add_alias(database, alias, user, description):
+    """
+    Add virtual alias
+    """
+
+    db = Database(database)
+    db_query = "SELECT source, destination FROM virtual_aliases "\
+               "WHERE source = '{}' "\
+               "AND destination = '{}'".format(alias, user)
+    result = db.query(db_query)
+    result_items = result.fetchone()
+    #import pdb; pdb.set_trace()
+    if result_items:
+        print 'Alias {} -> {} already exists!'.format(alias, user)
+        return False
+    alias_domain = alias.split("@")[-1]
+    # Check sanity of desired alias record
+    db_query = "SELECT email FROM virtual_users WHERE email = '{}'".format(user)
+    result = db.query(db_query)
+    result_items = result.fetchone()
+    if not result_items:
+        print "Invalid user " + user
+        return False
+    db_query = "SELECT name FROM virtual_domains WHERE name = '{}'".format(
+        alias_domain)
+    result = db.query(db_query)
+    result_items = result.fetchone()
+    if not result_items:
+        print '{} is not a domain managed by this server!'.format(alias_domain)
+        return False
+    # Finally add alias
+    db_query = "INSERT INTO virtual_aliases "\
+               "(source,destination,description,domain_id) VALUES ("\
+               "'{source}', '{destination}', '{description}', "\
+               "(SELECT id from virtual_domains WHERE name='{domain}'))"\
+               .format(
+                    source=alias,
+                    destination=user,
+                    description=description,
+                    domain=alias_domain)
+    result = db.query(db_query)
+    if result.rowcount:
+        print 'Added virtual alias {} -> {} '.format(alias, user)
+        return True
+    else:
+        print 'Failed to add virtual alias {} -> {} '.format(alias, user)
         return False
 
 
@@ -144,8 +193,15 @@ def main():
     parser_disable = subparsers.add_parser('disable', help='disable alias')
     parser_disable.add_argument('alias', help='alias to disable')
     # Create parser for the "disable" command
-    parser_disable = subparsers.add_parser('enable', help='enable alias')
-    parser_disable.add_argument('alias', help='alias to ensable')
+    parser_enable = subparsers.add_parser('enable', help='enable alias')
+    parser_enable.add_argument('alias', help='alias to enable')
+    # Create parser for the "add" command
+    parser_add = subparsers.add_parser('add', help='add alias')
+    parser_add.add_argument('-a', '--alias', help='alias name')
+    parser_add.add_argument('-u', '--user', help='destination user')
+    parser_add.add_argument('-c', '--comment',
+                            help='alias description',
+                            default='')
     # Parse provided arguments
     args = parser.parse_args()
     if not os.path.isfile(args.database):
@@ -154,9 +210,11 @@ def main():
     if args.subcommand == 'show':
         show(args.database, args.objects)
     elif args.subcommand == 'disable':
-        disable(args.database, args.alias)
+        disable_alias(args.database, args.alias)
     elif args.subcommand == 'enable':
-        enable(args.database, args.alias)
+        enable_alias(args.database, args.alias)
+    elif args.subcommand == 'add':
+        add_alias(args.database, args.alias, args.user, args.comment)
 
 
 if __name__ == '__main__':
