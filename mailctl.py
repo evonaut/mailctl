@@ -128,7 +128,6 @@ def add_alias(database, alias, user, description):
                "AND destination = '{}'".format(alias, user)
     result = db.query(db_query)
     result_items = result.fetchone()
-    #import pdb; pdb.set_trace()
     if result_items:
         print 'Alias {} -> {} already exists!'.format(alias, user)
         return False
@@ -184,7 +183,7 @@ def main():
     parser_show = subparsers.add_parser('show',
                                         help='show database content')
     parser_show.add_argument('objects',
-                             help='show users',
+                             help='show database content',
                              choices=['users',
                                       'domains',
                                       'aliases',
