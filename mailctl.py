@@ -37,9 +37,13 @@ def show(database, objects):
     """
 
     db = Database(database)
-    if objects == 'aliases':
-        db_query = 'SELECT source, destination, created, description '\
-                   'FROM virtual_aliases WHERE enabled'
+    if objects in ('aliases', 'disabled'):
+        if objects == 'aliases':
+            db_query = 'SELECT source, destination, created, description '\
+                       'FROM virtual_aliases WHERE enabled'
+        else:
+            db_query = 'SELECT source, destination, created, description '\
+                       'FROM virtual_aliases WHERE enabled = 0'
         result = db.query(db_query)
         aliases = {}
         for row in result:
@@ -65,6 +69,54 @@ def show(database, objects):
     return True
 
 
+def disable(database, alias):
+    """
+    Disable virtual alias
+    """
+
+    db = Database(database)
+    db_query = "SELECT source FROM virtual_aliases "\
+               "WHERE enabled AND source = '{}'".format(alias)
+    result = db.query(db_query)
+    result_items = result.fetchone()
+    if result_items is None:
+        print 'No enabled alias {}!'.format(alias)
+        return False
+    db_query = "UPDATE virtual_aliases SET enabled = 0 "\
+               "WHERE source = '{}'".format(alias)
+    result = db.query(db_query)
+    if result.rowcount:
+        print "Disabled virtual alias " + alias
+        return True
+    else:
+        print "Failed to disable virtual alias " + alias
+        return False
+
+
+def enable(database, alias):
+    """
+    Enable virtual alias
+    """
+
+    db = Database(database)
+    db_query = "SELECT source FROM virtual_aliases "\
+               "WHERE enabled = 0 AND source = '{}'".format(alias)
+    result = db.query(db_query)
+    result_items = result.fetchone()
+    if result_items is None:
+        print 'No disabled alias {}!'.format(alias)
+        return False
+    db_query = "UPDATE virtual_aliases SET enabled = 1 "\
+               "WHERE source = '{}'".format(alias)
+    result = db.query(db_query)
+    if result.rowcount:
+        print "Enabled virtual alias " + alias
+        return True
+    else:
+        print "Failed to enable virtual alias " + alias
+        return False
+
+
 def main():
     """
     Script main routine
@@ -79,12 +131,21 @@ def main():
                                        title='subcommands',
                                        description='valid subcommands',
                                        help='sub-command help')
-    # Create parser for the "show" command"
+    # Create parser for the "show" command
     parser_show = subparsers.add_parser('show',
                                         help='show database content')
     parser_show.add_argument('objects',
                              help='show users',
-                             choices=['users', 'domains', 'aliases'])
+                             choices=['users',
+                                      'domains',
+                                      'aliases',
+                                      'disabled'])
+    # Create parser for the "disable" command
+    parser_disable = subparsers.add_parser('disable', help='disable alias')
+    parser_disable.add_argument('alias', help='alias to disable')
+    # Create parser for the "disable" command
+    parser_disable = subparsers.add_parser('enable', help='enable alias')
+    parser_disable.add_argument('alias', help='alias to ensable')
     # Parse provided arguments
     args = parser.parse_args()
     if not os.path.isfile(args.database):
@@ -92,6 +153,10 @@ def main():
         sys.exit(1)
     if args.subcommand == 'show':
         show(args.database, args.objects)
+    elif args.subcommand == 'disable':
+        disable(args.database, args.alias)
+    elif args.subcommand == 'enable':
+        enable(args.database, args.alias)
 
 
 if __name__ == '__main__':
