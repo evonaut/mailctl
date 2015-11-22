@@ -51,6 +51,18 @@ def show(database, objects):
                 aliases[source] = destination
         for alias in aliases:
             print '{} -> {}'.format(alias, aliases[alias])
+        return True
+    elif objects == 'domains':
+        db_query = 'SELECT name FROM virtual_domains'
+    elif objects == 'users':
+        db_query = 'SELECT email FROM virtual_users'
+    else:
+        print 'Invalid object type to show'
+        return False
+    result = db.query(db_query)
+    for row in result:
+        print row[0]
+    return True
 
 
 def main():
