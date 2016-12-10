@@ -9,8 +9,13 @@ import sys
 import os
 import argparse
 import sqlite3
-
-DEFAULT_DB = '/etc/mail/mail.sqlite'
+try:
+    from passlib.hash import sha512_crypt
+except ImportError:
+    print 'Failed to import passlib.'
+    print 'Please run this script in a virtual environment with passlib installed'
+    sys.exit(1)
+from random import choice
 
 
 class Database(object):
@@ -28,193 +33,121 @@ class Database(object):
     def __del__(self):
         self.conn.close()
 
+DB = 'mail.sqlite'
 
-def show(database, objects):
+
+class MailCtl(object):
     """
-    Show database content
-
-    Valid show objects are users, domains and aliases
+    Script main class
     """
 
-    db = Database(database)
-    if objects in ('aliases', 'disabled'):
-        if objects == 'aliases':
-            db_query = 'SELECT source, destination, created, description '\
-                       'FROM virtual_aliases WHERE enabled'
+    def __init__(self):
+        # Create top level parser
+        parser = argparse.ArgumentParser(description='Postfix database management tool',
+                usage='''mailctl.py <command> [<args>]
+
+The most commonly used commands are:
+   user     manage users
+   alias    mange aliases
+   domains  manage domains
+''')
+        parser.add_argument('command', help='Subcommand to run')
+        # parse_args defaults to [1:] for args, but exclude the rest of the args too,
+        # or validation will fail
+        args = parser.parse_args(sys.argv[1:2])
+        if not hasattr(self, args.command):
+            print 'Unrecognized command'
+            parser.print_help()
+            sys.exit(1)
+        # use dispatch pattern to invoke method with same name
+        getattr(self, args.command)()
+
+    def user(self):
+        """
+        Handle mail accounts
+        """
+        # Create command parser
+        parser = argparse.ArgumentParser(
+            description='Manage users')
+        subparsers = parser.add_subparsers(dest='subcommand',
+                                           title='subcommands',
+                                           description='valid subcommands',
+                                           help='valid subcommands')
+        # Create subparsers
+        parser_show = subparsers.add_parser('show', help='show users')
+        parser_add = subparsers.add_parser('add', help='add user')
+        parser_add.add_argument('username', help='user name')
+        parser_delete = subparsers.add_parser('delete', help='delete user')
+
+        args = parser.parse_args(sys.argv[2:])
+
+        if not os.path.isfile(DB):
+            print 'Database file {} does not exist!'.format(DB)
+            sys.exit(1)
         else:
-            db_query = 'SELECT source, destination, created, description '\
-                       'FROM virtual_aliases WHERE enabled = 0'
-        result = db.query(db_query)
-        aliases = {}
-        for row in result:
-            source = row[0]
-            destination = row[1]
-            if source in aliases.keys():
-                aliases[source] = '{}, {}'.format(aliases[source], destination)
+            db = Database(DB)
+
+        if args.subcommand == 'show':
+            db_query = 'SELECT email FROM virtual_users'
+            result = db.query(db_query)
+            for row in result:
+                print row[0]
+            sys.exit(0)
+
+        elif args.subcommand == 'add':
+            # Check if user already exists before we add him twice
+            db_query = "SELECT email FROM virtual_users WHERE email = '{}'".format(args.username)
+            result = db.query(db_query)
+            if result.fetchone():
+                print 'User {} already exists!'.format(args.username)
+                sys.exit(1)
+            # Get id of virtual domain this user belongs to
+            try:
+                domain = args.username.split('@')[1]
+            except IndexError:
+                print 'Invalid user name syntax. Needs to be user@domain.tld.'
+                sys.exit(1)
+            db_query = "SELECT id FROM virtual_domains WHERE name = '{}'".format(domain)
+            result = db.query(db_query)
+            try:
+                domain_id = result.fetchone()[0]
+            except TypeError:
+                print 'Domain {} is not handled by this system. Aborting.'.format(domain)
+                sys.exit(1)
+
+            # Create SHA512-Crypt password hash for this user
+            charsets = [
+                'abcdefghijklmnopqrstuvwxyz',
+                'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                '0123456789',
+                '^!\$%&/()=?{[]}+~#-_.:,;<>',]
+            password_characters = []
+            charset = choice(charsets)
+            while len(password_characters) < 12:
+                password_characters.append(choice(charset))
+                charset = choice(list(set(charsets) - set([charset])))
+            password = "".join(password_characters)
+            password_hash = '{SHA512-CRYPT}' + sha512_crypt.using(rounds=5000).hash(password)
+
+            # Add user to database
+            db_query = "INSERT INTO virtual_users "\
+                       "(domain_id, password, email) VALUES ("\
+                       "'{domain_id}', '{password}', '{user}')".format(
+                            user=args.username,
+                            password=password_hash,
+                            domain_id=domain_id)
+            result = db.query(db_query)
+            if result.rowcount:
+                print 'Added user {} with password {}'.format(args.username, password)
+                sys.exit(0)
             else:
-                aliases[source] = destination
-        for alias in aliases:
-            print '{} -> {}'.format(alias, aliases[alias])
-        return True
-    elif objects == 'domains':
-        db_query = 'SELECT name FROM virtual_domains'
-    elif objects == 'users':
-        db_query = 'SELECT email FROM virtual_users'
-    else:
-        print 'Invalid object type to show'
-        return False
-    result = db.query(db_query)
-    for row in result:
-        print row[0]
-    return True
+                print 'Failed to add user {} '.format(args.username)
+                sys.exit(1)
 
-
-def disable_alias(database, alias):
-    """
-    Disable virtual alias
-    """
-
-    db = Database(database)
-    db_query = "SELECT source FROM virtual_aliases "\
-               "WHERE enabled AND source = '{}'".format(alias)
-    result = db.query(db_query)
-    result_items = result.fetchone()
-    if result_items is None:
-        print 'No enabled alias {}!'.format(alias)
-        return False
-    db_query = "UPDATE virtual_aliases SET enabled = 0 "\
-               "WHERE source = '{}'".format(alias)
-    result = db.query(db_query)
-    if result.rowcount:
-        print "Disabled virtual alias " + alias
-        return True
-    else:
-        print "Failed to disable virtual alias " + alias
-        return False
-
-
-def enable_alias(database, alias):
-    """
-    Enable virtual alias
-    """
-
-    db = Database(database)
-    db_query = "SELECT source FROM virtual_aliases "\
-               "WHERE enabled = 0 AND source = '{}'".format(alias)
-    result = db.query(db_query)
-    result_items = result.fetchone()
-    if result_items is None:
-        print 'No disabled alias {}!'.format(alias)
-        return False
-    db_query = "UPDATE virtual_aliases SET enabled = 1 "\
-               "WHERE source = '{}'".format(alias)
-    result = db.query(db_query)
-    if result.rowcount:
-        print 'Enabled virtual alias ' + alias
-        return True
-    else:
-        print 'Failed to enable virtual alias ' + alias
-        return False
-
-
-def add_alias(database, alias, user, description):
-    """
-    Add virtual alias
-    """
-
-    db = Database(database)
-    db_query = "SELECT source, destination FROM virtual_aliases "\
-               "WHERE source = '{}' "\
-               "AND destination = '{}'".format(alias, user)
-    result = db.query(db_query)
-    result_items = result.fetchone()
-    if result_items:
-        print 'Alias {} -> {} already exists!'.format(alias, user)
-        return False
-    alias_domain = alias.split("@")[-1]
-    # Check sanity of desired alias record
-    db_query = "SELECT email FROM virtual_users WHERE email = '{}'".format(user)
-    result = db.query(db_query)
-    result_items = result.fetchone()
-    if not result_items:
-        print "Invalid user " + user
-        return False
-    db_query = "SELECT name FROM virtual_domains WHERE name = '{}'".format(
-        alias_domain)
-    result = db.query(db_query)
-    result_items = result.fetchone()
-    if not result_items:
-        print '{} is not a domain managed by this server!'.format(alias_domain)
-        return False
-    # Finally add alias
-    db_query = "INSERT INTO virtual_aliases "\
-               "(source,destination,description,domain_id) VALUES ("\
-               "'{source}', '{destination}', '{description}', "\
-               "(SELECT id from virtual_domains WHERE name='{domain}'))"\
-               .format(
-                    source=alias,
-                    destination=user,
-                    description=description,
-                    domain=alias_domain)
-    result = db.query(db_query)
-    if result.rowcount:
-        print 'Added virtual alias {} -> {} '.format(alias, user)
-        return True
-    else:
-        print 'Failed to add virtual alias {} -> {} '.format(alias, user)
-        return False
-
-
-def main():
-    """
-    Script main routine
-    """
-    # Setup argument parser
-    # Create top level parser
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--database',
-                        help='database to use',
-                        default=DEFAULT_DB)
-    subparsers = parser.add_subparsers(dest='subcommand',
-                                       title='subcommands',
-                                       description='valid subcommands',
-                                       help='sub-command help')
-    # Create parser for the "show" command
-    parser_show = subparsers.add_parser('show',
-                                        help='show database content')
-    parser_show.add_argument('objects',
-                             help='show database content',
-                             choices=['users',
-                                      'domains',
-                                      'aliases',
-                                      'disabled'])
-    # Create parser for the "disable" command
-    parser_disable = subparsers.add_parser('disable', help='disable alias')
-    parser_disable.add_argument('alias', help='alias to disable')
-    # Create parser for the "disable" command
-    parser_enable = subparsers.add_parser('enable', help='enable alias')
-    parser_enable.add_argument('alias', help='alias to enable')
-    # Create parser for the "add" command
-    parser_add = subparsers.add_parser('add', help='add alias')
-    parser_add.add_argument('-a', '--alias', help='alias name')
-    parser_add.add_argument('-u', '--user', help='destination user')
-    parser_add.add_argument('-c', '--comment',
-                            help='alias description',
-                            default='')
-    # Parse provided arguments
-    args = parser.parse_args()
-    if not os.path.isfile(args.database):
-        print 'Database file {} does not exist!'.format(args.database)
-        sys.exit(1)
-    if args.subcommand == 'show':
-        show(args.database, args.objects)
-    elif args.subcommand == 'disable':
-        disable_alias(args.database, args.alias)
-    elif args.subcommand == 'enable':
-        enable_alias(args.database, args.alias)
-    elif args.subcommand == 'add':
-        add_alias(args.database, args.alias, args.user, args.comment)
+        elif args.subcommand == 'delete':
+            print 'Deleting users is not implemented yet'
+            sys.exit(0)
 
 
 if __name__ == '__main__':
-    main()
+    MailCtl()
