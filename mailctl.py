@@ -33,13 +33,13 @@ class Database(object):
     def __del__(self):
         self.conn.close()
 
-DB = 'mail.sqlite'
-
 
 class MailCtl(object):
     """
     Script main class
     """
+
+    DB = 'mail.sqlite'
 
     def __init__(self):
         # Create top level parser
@@ -59,8 +59,101 @@ The most commonly used commands are:
             print 'Unrecognized command'
             parser.print_help()
             sys.exit(1)
+
+        # Setup database connection
+        if not os.path.isfile(self.DB):
+            print 'Database file{} is not a file.'.format(self.DB)
+            sys.exit(1)
+        else:
+            self.db = Database(self.DB)
+
         # use dispatch pattern to invoke method with same name
         getattr(self, args.command)()
+
+    def show_users(self):
+        """
+        Show database users
+        """
+        db_query = 'SELECT email FROM virtual_users'
+        result = self.db.query(db_query)
+        for row in result:
+            print row[0]
+
+    def add_user(self, username):
+        """
+        Addd user to database
+        """
+
+        # Check if user already exists before we add him twice
+        db_query = "SELECT email FROM virtual_users WHERE email = '{}'".format(username)
+        result = self.db.query(db_query)
+        if result.fetchone():
+            print 'User {} already exists!'.format(username)
+            return False
+        # Get id of virtual domain this user belongs to
+        try:
+            domain = username.split('@')[1]
+        except IndexError:
+            print 'Invalid user name syntax. Needs to be user@domain.tld.'
+            return False
+        db_query = "SELECT id FROM virtual_domains WHERE name = '{}'".format(domain)
+        result = self.db.query(db_query)
+        try:
+            domain_id = result.fetchone()[0]
+        except TypeError:
+            print 'Domain {} is not handled by this system. Aborting.'.format(domain)
+            return False
+
+        # Create SHA512-Crypt password hash for this user
+        charsets = [
+            'abcdefghijklmnopqrstuvwxyz',
+            'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+            '0123456789',
+            '^!\$%&/()=?{[]}+~#-_.:,;<>',]
+        password_characters = []
+        charset = choice(charsets)
+        while len(password_characters) < 12:
+            password_characters.append(choice(charset))
+            charset = choice(list(set(charsets) - set([charset])))
+        password = "".join(password_characters)
+        password_hash = '{SHA512-CRYPT}' + sha512_crypt.using(rounds=5000).hash(password)
+
+        # Add user to database
+        db_query = "INSERT INTO virtual_users "\
+                   "(domain_id, password, email) VALUES ("\
+                   "'{domain_id}', '{password}', '{user}')".format(
+                        user=username,
+                        password=password_hash,
+                        domain_id=domain_id)
+        result = self.db.query(db_query)
+        if result.rowcount:
+            print 'Added user {} with password {}'.format(username, password)
+            return True
+        else:
+            print 'Failed to add user {} '.format(username)
+            return False
+
+    def delete_user(self, username):
+        """
+        Delete user from database
+        """
+
+        # Check if user to be deleted exists in database
+        db_query = "SELECT email FROM virtual_users WHERE email = '{}'".format(username)
+        result = self.db.query(db_query)
+        if not result.fetchone():
+            print 'User {} does not exist!'.format(username)
+            return False
+
+        # Delete User
+        db_query = "DELETE FROM virtual_users WHERE email = '{}'".format(username)
+        result = self.db.query(db_query)
+        if result.rowcount:
+            print 'Deleted user {}'.format(username)
+            return True
+        else:
+            print 'Failed to delete user {} '.format(username)
+            return False
 
     def user(self):
         """
@@ -78,75 +171,20 @@ The most commonly used commands are:
         parser_add = subparsers.add_parser('add', help='add user')
         parser_add.add_argument('username', help='user name')
         parser_delete = subparsers.add_parser('delete', help='delete user')
+        parser_delete.add_argument('username', help='user name')
 
         args = parser.parse_args(sys.argv[2:])
 
-        if not os.path.isfile(DB):
-            print 'Database file {} does not exist!'.format(DB)
-            sys.exit(1)
-        else:
-            db = Database(DB)
-
         if args.subcommand == 'show':
-            db_query = 'SELECT email FROM virtual_users'
-            result = db.query(db_query)
-            for row in result:
-                print row[0]
-            sys.exit(0)
+            self.show_users()
 
         elif args.subcommand == 'add':
-            # Check if user already exists before we add him twice
-            db_query = "SELECT email FROM virtual_users WHERE email = '{}'".format(args.username)
-            result = db.query(db_query)
-            if result.fetchone():
-                print 'User {} already exists!'.format(args.username)
-                sys.exit(1)
-            # Get id of virtual domain this user belongs to
-            try:
-                domain = args.username.split('@')[1]
-            except IndexError:
-                print 'Invalid user name syntax. Needs to be user@domain.tld.'
-                sys.exit(1)
-            db_query = "SELECT id FROM virtual_domains WHERE name = '{}'".format(domain)
-            result = db.query(db_query)
-            try:
-                domain_id = result.fetchone()[0]
-            except TypeError:
-                print 'Domain {} is not handled by this system. Aborting.'.format(domain)
-                sys.exit(1)
-
-            # Create SHA512-Crypt password hash for this user
-            charsets = [
-                'abcdefghijklmnopqrstuvwxyz',
-                'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                '0123456789',
-                '^!\$%&/()=?{[]}+~#-_.:,;<>',]
-            password_characters = []
-            charset = choice(charsets)
-            while len(password_characters) < 12:
-                password_characters.append(choice(charset))
-                charset = choice(list(set(charsets) - set([charset])))
-            password = "".join(password_characters)
-            password_hash = '{SHA512-CRYPT}' + sha512_crypt.using(rounds=5000).hash(password)
-
-            # Add user to database
-            db_query = "INSERT INTO virtual_users "\
-                       "(domain_id, password, email) VALUES ("\
-                       "'{domain_id}', '{password}', '{user}')".format(
-                            user=args.username,
-                            password=password_hash,
-                            domain_id=domain_id)
-            result = db.query(db_query)
-            if result.rowcount:
-                print 'Added user {} with password {}'.format(args.username, password)
-                sys.exit(0)
-            else:
-                print 'Failed to add user {} '.format(args.username)
+            if not self.add_user(args.username):
                 sys.exit(1)
 
         elif args.subcommand == 'delete':
-            print 'Deleting users is not implemented yet'
-            sys.exit(0)
+            if not self.delete_user(args.username):
+                sys.exit(1)
 
 
 if __name__ == '__main__':
