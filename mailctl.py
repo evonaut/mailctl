@@ -222,7 +222,6 @@ The most commonly used commands are:
             print "Failed to disable virtual alias " + alias
             return False
 
-
     def enable_alias(self, alias):
         """
         Enable virtual alias
@@ -243,6 +242,71 @@ The most commonly used commands are:
             return True
         else:
             print 'Failed to enable virtual alias ' + alias
+            return False
+
+    def add_alias(self, alias, user, description):
+        """
+        Add virtual alias
+        """
+
+        db_query = "SELECT source, destination FROM virtual_aliases "\
+                   "WHERE source = '{}' "\
+                   "AND destination = '{}'".format(alias, user)
+        result = self.db.query(db_query)
+        result_items = result.fetchone()
+        if result_items:
+            print 'Alias {} -> {} already exists!'.format(alias, user)
+            return False
+        alias_domain = alias.split("@")[-1]
+        # Check sanity of desired alias record
+        db_query = "SELECT email FROM virtual_users WHERE email = '{}'".format(user)
+        result = self.db.query(db_query)
+        result_items = result.fetchone()
+        if not result_items:
+            print "Invalid user " + user
+            return False
+        db_query = "SELECT name FROM virtual_domains WHERE name = '{}'".format(alias_domain)
+        result = self.db.query(db_query)
+        result_items = result.fetchone()
+        if not result_items:
+            print '{} is not a domain managed by this server!'.format(alias_domain)
+            return False
+        # Finally add alias
+        db_query = "INSERT INTO virtual_aliases "\
+                   "(source,destination,description,domain_id) VALUES ("\
+                   "'{source}', '{destination}', '{description}', "\
+                   "(SELECT id from virtual_domains WHERE name='{domain}'))"\
+                   .format(
+                        source=alias,
+                        destination=user,
+                        description=description,
+                        domain=alias_domain)
+        result = self.db.query(db_query)
+        if result.rowcount:
+            print 'Added virtual alias {} -> {} '.format(alias, user)
+            return True
+        else:
+            print 'Failed to add virtual alias {} -> {} '.format(alias, user)
+            return False
+
+    def delete_alias(self, alias):
+        """
+        Delete virtual alias from database
+        """
+
+        db_query = "SELECT source FROM virtual_aliases WHERE source = '{}'".format(alias)
+        result = self.db.query(db_query)
+        result_items = result.fetchone()
+        if result_items is None:
+            print 'Alias {} does not exist!'.format(alias)
+            return False
+        db_query = "DELETE FROM virtual_aliases WHERE source = '{}'".format(alias)
+        result = self.db.query(db_query)
+        if result.rowcount:
+            print "Deleted virtual alias " + alias
+            return True
+        else:
+            print "Failed to delete virtual alias " + alias
             return False
 
     def user(self):
@@ -302,11 +366,14 @@ The most commonly used commands are:
         parser_enable.add_argument('alias', help='alias to enable')
         # Create parser for the "add" command
         parser_add = subparsers.add_parser('add', help='add alias')
-        parser_add.add_argument('-a', '--alias', help='alias name')
-        parser_add.add_argument('-u', '--user', help='destination user')
+        parser_add.add_argument('-a', '--alias', help='alias name', required=True)
+        parser_add.add_argument('-u', '--user', help='destination user', required=True)
         parser_add.add_argument('-c', '--comment',
                                 help='alias description',
                                 default='')
+        # Create parser for the "delete" command
+        parser_delete = subparsers.add_parser('delete', help='delete alias')
+        parser_delete.add_argument('alias', help='alias to delete')
 
         args = parser.parse_args(sys.argv[2:])
 
@@ -319,6 +386,12 @@ The most commonly used commands are:
                 sys.exit(1)
         elif args.subcommand == 'disable':
             if not self.disable_alias(args.alias):
+                sys.exit(1)
+        elif args.subcommand == 'add':
+            if not self.add_alias(args.alias, args.user, args.comment):
+                sys.exit(1)
+        elif args.subcommand == 'delete':
+            if not self.delete_alias(args.alias):
                 sys.exit(1)
 
 
