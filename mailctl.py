@@ -62,10 +62,14 @@ The most commonly used commands are:
 
         # Setup database connection
         if not os.path.isfile(self.DB):
-            print 'Database file{} is not a file.'.format(self.DB)
+            print 'Database file {} is not a file.'.format(self.DB)
             sys.exit(1)
         else:
-            self.db = Database(self.DB)
+            try:
+                self.db = Database(self.DB)
+            except sqlite3.OperationalError as error:
+                print 'Failed to open database file {}: {}'.format(self.DB, str(error))
+                sys.exit(1)
 
         # use dispatch pattern to invoke method with same name
         getattr(self, args.command)()
@@ -109,7 +113,7 @@ The most commonly used commands are:
             'abcdefghijklmnopqrstuvwxyz',
             'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
             '0123456789',
-            '^!\$%&/()=?{[]}+~#-_.:,;<>',]
+            '^!%&/()=?{[]}+~#-_.:,;<>',]
         password_characters = []
         charset = choice(charsets)
         while len(password_characters) < 12:
@@ -145,7 +149,41 @@ The most commonly used commands are:
             print 'User {} does not exist!'.format(username)
             return False
 
-        # Delete User
+        # Get list of aliases pointing to this user
+        db_query = "SELECT source FROM virtual_aliases WHERE destination = '{}'".format(username)
+        result = self.db.query(db_query)
+        result_set = result.fetchall()
+        if result_set:
+            aliases = []
+            print 'User {} is configured destination for these virtual aliases.'.format(username)
+            print 'They will be deleted along with the user!'
+            for row in result_set:
+                aliases.append("'{}'".format(row[0]))
+                print row[0]
+            prompt = 'Enter YES to confirm deletion of user {} and all of its aliases: '\
+                     .format(username)
+        else:
+            print 'No virtual aliases configured for user {}'.format(username)
+            prompt = 'Enter YES to confirm deletion of user {}: '.format(username)
+        confirmation = raw_input(prompt)
+        if confirmation != 'YES':
+            print 'Aborting'
+            return True
+
+        # Delete virtual aliases for this user
+        if aliases:
+            db_query = "DELETE FROM virtual_aliases "\
+                       "WHERE source IN ({aliases}) AND destination = '{user}'"\
+                       .format(aliases=','.join(aliases),
+                               user=username)
+            result = self.db.query(db_query)
+            if result.rowcount:
+                print "Deleted virtual aliases for " + username
+            else:
+                print "Failed to delete virtual aliases for " + username
+                return False
+
+        # Delete user
         db_query = "DELETE FROM virtual_users WHERE email = '{}'".format(username)
         result = self.db.query(db_query)
         if result.rowcount:
