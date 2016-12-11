@@ -155,6 +155,51 @@ The most commonly used commands are:
             print 'Failed to delete user {} '.format(username)
             return False
 
+    def show_aliases(self, filter):
+        """
+        Show configured aliases
+        """
+        if filter == 'all':
+            db_query = 'SELECT source, destination FROM virtual_aliases'
+        elif filter == 'enabled':
+            db_query = 'SELECT source, destination FROM virtual_aliases WHERE enabled'
+        elif filter == 'disabled':
+            db_query = 'SELECT source, destination FROM virtual_aliases WHERE enabled = 0'
+        else:
+            print 'Invalid filter: ' + filter
+            return False
+        result = self.db.query(db_query)
+        aliases = {}
+        for row in result:
+            source = row[0]
+            destination = row[1]
+            if source in aliases.keys():
+                aliases[source] = '{}, {}'.format(aliases[source], destination)
+            else:
+                aliases[source] = destination
+        for alias in aliases:
+            print '{} -> {}'.format(alias, aliases[alias])
+        return True
+
+    def search_aliases(self, pattern):
+        """
+        Search configured aliases
+        """
+        db_query = "SELECT source, destination FROM virtual_aliases "\
+                   "WHERE source LIKE '%{}%'".format(pattern)
+        result = self.db.query(db_query)
+        aliases = {}
+        for row in result:
+            source = row[0]
+            destination = row[1]
+            if source in aliases.keys():
+                aliases[source] = '{}, {}'.format(aliases[source], destination)
+            else:
+                aliases[source] = destination
+        for alias in aliases:
+            print '{} -> {}'.format(alias, aliases[alias])
+        return True
+
     def user(self):
         """
         Handle mail accounts
@@ -185,6 +230,48 @@ The most commonly used commands are:
         elif args.subcommand == 'delete':
             if not self.delete_user(args.username):
                 sys.exit(1)
+
+    def alias(self):
+        """
+        Handle aliases
+        """
+        # Create command parser
+        parser = argparse.ArgumentParser(
+            description='Manage aliases')
+        subparsers = parser.add_subparsers(dest='subcommand',
+                                           title='subcommands',
+                                           description='valid subcommands',
+                                           help='valid subcommands')
+        # Create parser for the "show" command
+        parser_show = subparsers.add_parser('show', help='show aliases')
+        parser_show.add_argument('-f', '--filter',
+                                 help='filter alias',
+                                 choices=['all', 'enabled', 'disabled'],
+                                 default='all')
+        # Create parser for the "search" command
+        parser_search = subparsers.add_parser('search', help='search aliases')
+        parser_search.add_argument('pattern', help='search pattern')
+        # Create parser for the "disable" command
+        parser_disable = subparsers.add_parser('disable', help='disable alias')
+        parser_disable.add_argument('alias', help='alias to disable')
+        # Create parser for the "disable" command
+        parser_enable = subparsers.add_parser('enable', help='enable alias')
+        parser_enable.add_argument('alias', help='alias to enable')
+        # Create parser for the "add" command
+        parser_add = subparsers.add_parser('add', help='add alias')
+        parser_add.add_argument('-a', '--alias', help='alias name')
+        parser_add.add_argument('-u', '--user', help='destination user')
+        parser_add.add_argument('-c', '--comment',
+                                help='alias description',
+                                default='')
+
+        args = parser.parse_args(sys.argv[2:])
+
+        if args.subcommand == 'show':
+            self.show_aliases(args.filter)
+
+        elif args.subcommand == 'search':
+            self.search_aliases(args.pattern)
 
 
 if __name__ == '__main__':
