@@ -200,6 +200,51 @@ The most commonly used commands are:
             print '{} -> {}'.format(alias, aliases[alias])
         return True
 
+    def disable_alias(self, alias):
+        """
+        Disable virtual alias
+        """
+
+        db_query = "SELECT source FROM virtual_aliases "\
+                   "WHERE enabled AND source = '{}'".format(alias)
+        result = self.db.query(db_query)
+        result_items = result.fetchone()
+        if result_items is None:
+            print 'No enabled alias {}!'.format(alias)
+            return False
+        db_query = "UPDATE virtual_aliases SET enabled = 0 "\
+                   "WHERE source = '{}'".format(alias)
+        result = self.db.query(db_query)
+        if result.rowcount:
+            print "Disabled virtual alias " + alias
+            return True
+        else:
+            print "Failed to disable virtual alias " + alias
+            return False
+
+
+    def enable_alias(self, alias):
+        """
+        Enable virtual alias
+        """
+
+        db_query = "SELECT source FROM virtual_aliases "\
+                   "WHERE enabled = 0 AND source = '{}'".format(alias)
+        result = self.db.query(db_query)
+        result_items = result.fetchone()
+        if result_items is None:
+            print 'No disabled alias {}!'.format(alias)
+            return False
+        db_query = "UPDATE virtual_aliases SET enabled = 1 "\
+                   "WHERE source = '{}'".format(alias)
+        result = self.db.query(db_query)
+        if result.rowcount:
+            print 'Enabled virtual alias ' + alias
+            return True
+        else:
+            print 'Failed to enable virtual alias ' + alias
+            return False
+
     def user(self):
         """
         Handle mail accounts
@@ -222,11 +267,9 @@ The most commonly used commands are:
 
         if args.subcommand == 'show':
             self.show_users()
-
         elif args.subcommand == 'add':
             if not self.add_user(args.username):
                 sys.exit(1)
-
         elif args.subcommand == 'delete':
             if not self.delete_user(args.username):
                 sys.exit(1)
@@ -269,9 +312,14 @@ The most commonly used commands are:
 
         if args.subcommand == 'show':
             self.show_aliases(args.filter)
-
         elif args.subcommand == 'search':
             self.search_aliases(args.pattern)
+        elif args.subcommand == 'enable':
+            if not self.enable_alias(args.alias):
+                sys.exit(1)
+        elif args.subcommand == 'disable':
+            if not self.disable_alias(args.alias):
+                sys.exit(1)
 
 
 if __name__ == '__main__':
