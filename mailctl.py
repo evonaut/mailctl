@@ -11,14 +11,18 @@ import argparse
 import sqlite3
 try:
     from passlib.hash import sha512_crypt
+    PASSLIB_ENABLED = True
 except ImportError:
     print 'Failed to import passlib.'
-    print 'Please run this script in a virtual environment with passlib installed'
-    sys.exit(1)
+    print 'Password creation feature will be disabled.'
+    PASSLIB_ENABLED = False
 from random import choice
 
 
 class Database(object):
+    """
+    Wrapper to provide SQLite connectivity
+    """
     def __init__(self, db):
         self.conn = sqlite3.connect(db)
         self.conn.execute('pragma foreign_keys = on')
@@ -26,11 +30,17 @@ class Database(object):
         self.cur = self.conn.cursor()
 
     def query(self, arg):
+        """
+        Query database
+        """
         self.cur.execute(arg)
         self.conn.commit()
         return self.cur
 
     def __del__(self):
+        """
+        Close database connection
+        """
         self.conn.close()
 
 
@@ -43,13 +53,14 @@ class MailCtl(object):
 
     def __init__(self):
         # Create top level parser
-        parser = argparse.ArgumentParser(description='Postfix database management tool',
-                usage='''mailctl.py <command> [<args>]
+        parser = argparse.ArgumentParser(
+            description='Postfix database management tool',
+            usage='''mailctl.py <command> [<args>]
 
 The most commonly used commands are:
    user     manage users
    alias    mange aliases
-   domains  manage domains
+   domain   manage domains
 ''')
         parser.add_argument('command', help='Subcommand to run')
         # parse_args defaults to [1:] for args, but exclude the rest of the args too,
@@ -74,6 +85,168 @@ The most commonly used commands are:
         # use dispatch pattern to invoke method with same name
         getattr(self, args.command)()
 
+    def _hash_password(self, password):
+        """
+        Return SHA512-CRYPT password hash of a given password.
+
+        Requires the passlib module to work
+        """
+        if PASSLIB_ENABLED:
+            return '{SHA512-CRYPT}' + sha512_crypt.using(rounds=5000).hash(password)
+        else:
+            return False
+
+    def _get_domain_users(self, domainname):
+        """
+        Retrieve users for a domain from database
+
+        Returns list of users if users are configured. Empty list if there aren't any.
+        """
+
+        db_query = "SELECT  email FROM virtual_users WHERE domain_id = "\
+                   "(SELECT id from virtual_domains WHERE name='{}')".format(domainname)
+        result = self.db.query(db_query)
+        result_set = result.fetchall()
+        users = []
+        if result_set:
+            for row in result_set:
+                users.append(row[0])
+        return users
+
+    def _get_domain_aliases(self, domainname):
+        """
+        Retrieve aliases for a domain from database
+
+        Returns list of aliases if aliases are configured. Empty list if there aren't any.
+        """
+
+        db_query = "SELECT  source FROM virtual_aliases WHERE domain_id = "\
+                   "(SELECT id from virtual_domains WHERE name='{}')".format(domainname)
+        result = self.db.query(db_query)
+        result_set = result.fetchall()
+        aliases = []
+        if result_set:
+            for row in result_set:
+                alias = row[0]
+                if alias not in aliases:
+                    aliases.append(alias)
+        return sorted(aliases)
+
+    def _get_user_aliases(self, username):
+        """
+        Retrieve virtual aliases for a user from database
+
+        Returns list of aliases if aliases are configured. Empty list if there aren't any.
+        """
+
+        db_query = "SELECT source FROM virtual_aliases WHERE destination = '{}'".format(username)
+        result = self.db.query(db_query)
+        result_set = result.fetchall()
+        aliases = []
+        if result_set:
+            for row in result_set:
+                aliases.append(row[0])
+        return aliases
+
+    def show_domains(self):
+        """
+        Show database domains
+        """
+        db_query = 'SELECT name FROM virtual_domains'
+        result = self.db.query(db_query)
+        for row in result:
+            print row[0]
+
+    def add_domain(self, domainname):
+        """
+        Addd domain to database
+        """
+
+        # Check if domain already exists before we add it twice
+        db_query = "SELECT name FROM virtual_domains WHERE name = '{}'".format(domainname)
+        result = self.db.query(db_query)
+        if result.fetchone():
+            print 'Domain {} already exists!'.format(domainname)
+            return False
+        
+        # Add domain to database
+        db_query = "INSERT INTO virtual_domains (name) VALUES ('{}')".format(domainname)
+        result = self.db.query(db_query)
+        if result.rowcount:
+            print 'Added domain {}'.format(domainname)
+            return True
+        else:
+            print 'Failed to add domain {}'.format(domainname)
+            return False
+
+    def delete_domain(self, domainname):
+        """
+        Delete domain including all users and aliases from database
+        """
+
+        # Check if domain to be deleted exists in database
+        db_query = "SELECT name FROM virtual_domains WHERE name = '{}'".format(domainname)
+        result = self.db.query(db_query)
+        if not result.fetchone():
+            print 'Domain {} not found!'.format(domainname)
+            return False
+
+        # Get list of users of this domain
+        users = self._get_domain_users(domainname)
+        if users:
+            print 'Domain {} is home of these users. They will be deleted!'.format(domainname)
+            for user in sorted(users):
+                print user
+        else:
+            print "Domain {} has no users".format(domainname)
+        
+        # Get list of aliases of this domain
+        aliases = self._get_domain_aliases(domainname)
+        if aliases:
+            print 'Domain {} is home of these aliases. They will be deleted!'.format(domainname)
+            for alias in sorted(aliases):
+                print alias
+        else:
+            print "Domain {} has no aliases".format(domainname)
+        
+        confirmation = raw_input('\nEnter YES to remove domain {} including '\
+                                 'all aliases and users: '.format(domainname))
+        if confirmation != 'YES':
+            print 'Aborting'
+            return True
+
+        # Delete virtual aliases from this domain
+        if aliases:
+            db_query = "DELETE FROM virtual_aliases WHERE domain_id = "\
+                       "(SELECT id from virtual_domains WHERE name='{}')".format(domainname)
+            result = self.db.query(db_query)
+            if result.rowcount:
+                print "Deleted virtual aliases from " + domainname
+            else:
+                print "Failed to delete virtual aliases from " + domainname
+                return False
+
+        # Delete users from this domain
+        if users:
+            db_query = "DELETE FROM virtual_users WHERE domain_id = "\
+                        "(SELECT id from virtual_domains WHERE name='{}')".format(domainname)
+            result = self.db.query(db_query)
+            if result.rowcount:
+                print "Deleted users from " + domainname
+            else:
+                print "Failed to delete users from " + domainname
+                return False
+
+        # Delete the domain itself
+        db_query = "DELETE FROM virtual_domains WHERE name = '{}'".format(domainname)
+        result = self.db.query(db_query)
+        if result.rowcount:
+            print 'Deleted domain {}'.format(domainname)
+            return True
+        else:
+            print 'Failed to delete domain {} '.format(domainname)
+            return False
+
     def show_users(self):
         """
         Show database users
@@ -87,6 +260,11 @@ The most commonly used commands are:
         """
         Addd user to database
         """
+
+        # Adding users requires passlib to create the password hash to be stored in database.abs
+        if not PASSLIB_ENABLED:
+            print "Adding users is not enabled because the passlib module is missing."
+            return False
 
         # Check if user already exists before we add him twice
         db_query = "SELECT email FROM virtual_users WHERE email = '{}'".format(username)
@@ -120,21 +298,22 @@ The most commonly used commands are:
             password_characters.append(choice(charset))
             charset = choice(list(set(charsets) - set([charset])))
         password = "".join(password_characters)
-        password_hash = '{SHA512-CRYPT}' + sha512_crypt.using(rounds=5000).hash(password)
+        password_hash = self._hash_password(password)
 
         # Add user to database
         db_query = "INSERT INTO virtual_users "\
                    "(domain_id, password, email) VALUES ("\
-                   "'{domain_id}', '{password}', '{user}')".format(
-                        user=username,
-                        password=password_hash,
-                        domain_id=domain_id)
+                   "'{domain_id}', '{password}', '{user}')"\
+                   .format(
+                       user=username,
+                       password=password_hash,
+                       domain_id=domain_id)
         result = self.db.query(db_query)
         if result.rowcount:
             print 'Added user {} with password {}'.format(username, password)
             return True
         else:
-            print 'Failed to add user {} '.format(username)
+            print 'Failed to add user {}'.format(username)
             return False
 
     def delete_user(self, username):
@@ -150,16 +329,12 @@ The most commonly used commands are:
             return False
 
         # Get list of aliases pointing to this user
-        db_query = "SELECT source FROM virtual_aliases WHERE destination = '{}'".format(username)
-        result = self.db.query(db_query)
-        result_set = result.fetchall()
-        if result_set:
-            aliases = []
+        aliases = self._get_user_aliases(username)
+        if aliases:
             print 'User {} is configured destination for these virtual aliases.'.format(username)
             print 'They will be deleted along with the user!'
-            for row in result_set:
-                aliases.append("'{}'".format(row[0]))
-                print row[0]
+            for alias in sorted(aliases):
+                print alias
             prompt = 'Enter YES to confirm deletion of user {} and all of its aliases: '\
                      .format(username)
         else:
@@ -172,9 +347,12 @@ The most commonly used commands are:
 
         # Delete virtual aliases for this user
         if aliases:
+            quoted_aliases = []
+            for alias in aliases:
+                quoted_aliases.append("'{}'".format(alias))
             db_query = "DELETE FROM virtual_aliases "\
                        "WHERE source IN ({aliases}) AND destination = '{user}'"\
-                       .format(aliases=','.join(aliases),
+                       .format(aliases=','.join(quoted_aliases),
                                user=username)
             result = self.db.query(db_query)
             if result.rowcount:
@@ -193,15 +371,15 @@ The most commonly used commands are:
             print 'Failed to delete user {} '.format(username)
             return False
 
-    def show_aliases(self, filter):
+    def show_aliases(self, searchterm):
         """
         Show configured aliases
         """
-        if filter == 'all':
+        if searchterm == 'all':
             db_query = 'SELECT source, destination FROM virtual_aliases'
-        elif filter == 'enabled':
+        elif searchterm == 'enabled':
             db_query = 'SELECT source, destination FROM virtual_aliases WHERE enabled'
-        elif filter == 'disabled':
+        elif searchterm == 'disabled':
             db_query = 'SELECT source, destination FROM virtual_aliases WHERE enabled = 0'
         else:
             print 'Invalid filter: ' + filter
@@ -215,7 +393,7 @@ The most commonly used commands are:
                 aliases[source] = '{}, {}'.format(aliases[source], destination)
             else:
                 aliases[source] = destination
-        for alias in aliases:
+        for alias in sorted(aliases):
             print '{} -> {}'.format(alias, aliases[alias])
         return True
 
@@ -234,7 +412,7 @@ The most commonly used commands are:
                 aliases[source] = '{}, {}'.format(aliases[source], destination)
             else:
                 aliases[source] = destination
-        for alias in aliases:
+        for alias in sorted(aliases):
             print '{} -> {}'.format(alias, aliases[alias])
         return True
 
@@ -315,10 +493,10 @@ The most commonly used commands are:
                    "'{source}', '{destination}', '{description}', "\
                    "(SELECT id from virtual_domains WHERE name='{domain}'))"\
                    .format(
-                        source=alias,
-                        destination=user,
-                        description=description,
-                        domain=alias_domain)
+                       source=alias,
+                       destination=user,
+                       description=description,
+                       domain=alias_domain)
         result = self.db.query(db_query)
         if result.rowcount:
             print 'Added virtual alias {} -> {} '.format(alias, user)
@@ -347,10 +525,41 @@ The most commonly used commands are:
             print "Failed to delete virtual alias " + alias
             return False
 
+    def domain(self):
+        """
+        Handle domains
+        """
+
+        # Create command parser
+        parser = argparse.ArgumentParser(
+            description='Manage domains')
+        subparsers = parser.add_subparsers(dest='subcommand',
+                                           title='subcommands',
+                                           description='valid subcommands',
+                                           help='valid subcommands')
+        # Create subparsers
+        parser_show = subparsers.add_parser('show', help='show domains')
+        parser_add = subparsers.add_parser('add', help='add doamin')
+        parser_add.add_argument('domainname', help='domain name')
+        parser_delete = subparsers.add_parser('delete', help='delete domain')
+        parser_delete.add_argument('domainname', help='domain name')
+
+        args = parser.parse_args(sys.argv[2:])
+
+        if args.subcommand == 'show':
+            self.show_domains()
+        elif args.subcommand == 'add':
+            if not self.add_domain(args.domainname):
+                sys.exit(1)
+        elif args.subcommand == 'delete':
+            if not self.delete_domain(args.domainname):
+                sys.exit(1)
+    
     def user(self):
         """
         Handle mail accounts
         """
+        
         # Create command parser
         parser = argparse.ArgumentParser(
             description='Manage users')
