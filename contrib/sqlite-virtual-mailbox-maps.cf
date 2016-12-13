@@ -1,0 +1,2 @@
+dbpath = /etc/mail/mail.sqlite
+query = SELECT 1 FROM virtual_users WHERE email='%s'

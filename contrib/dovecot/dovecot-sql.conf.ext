@@ -1,0 +1,4 @@
+driver = sqlite
+connect = /etc/mail/mail.sqlite
+default_pass_scheme = SHA512-CRYPT
+password_query = SELECT email as user, password FROM virtual_users WHERE email='%u';
