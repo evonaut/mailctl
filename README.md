@@ -28,6 +28,9 @@ or [pip](https://pypi.python.org/pypi/pip):
 * Install `passlib` on Debian: `apt install python-passlib`  
 * Install `passlib` using pip: `pip install passlib`
 
+The location of the SQLite database file containing the data to manage is hardcoded in `mailctl.py`.
+Please adjust constant `MailCtl.DB` to match your environment before using the script. 
+
 ## Usage
 Domains, users and aliases can be managed using subcommands. A help system is included.
 
