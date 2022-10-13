@@ -1,40 +1,30 @@
 # mailctl
-Tool to manage virtual domains, users and aliases used by [Postfix](http://www.postfix.org)
-and [Dovecot](https://www.dovecot.org) in a [SQLite](https://sqlite.org) database.
+
+Tool to manage virtual domains, users and aliases used by [Postfix](http://www.postfix.org) and [Dovecot](https://www.dovecot.org) in a [SQLite](https://sqlite.org) database.
 
 ## Why?
-When I migrated my Postfix configuration to use a SQLite database instead of plain text files
-for domains, users and aliases, there were plenty of resources that described how to configure
-Postfix and Dovecot for that, but a practical way to manage the data in this mail database
-was left to the user. Using SQL queries in the SQLite CLI might be a way for some of us, but 
-it's far from convenient and fails to create the required password hashes. So I started to 
-write the missing tool myself. Hello `mailctl.py`.
+
+When I migrated my Postfix configuration to use a SQLite database instead of plain text files for domains, users and aliases, there were plenty of resources that described how to configure Postfix and Dovecot for that, but a practical way to manage the data in this mail database was left to the user. Using SQL queries in the SQLite CLI might be a way for some of us, but it's far from convenient and fails to create the required password hashes. So I started to write the missing tool myself. Hello `mailctl.py`.
 
 ## Requirements
-`mailctl` requires a Python 2 interpreter to run. This implementation relies on the database
-schema I use for my personal setup (available in`contrib/db_schema.sql`) but can be adjusted
-to other database designs as well. Config snippets to make this work with Postfix and Dovecot
-are included. I'm sure it can be used for other mail transfer agents or IMAP servers but I
-haven't tested that.
 
-Creation of user password hashes relies on the Python
-[passlib](https://pypi.python.org/pypi/passlib) module which is not part of the standard Python
-distribution. The script can be used without it, but then users can not be added and their
-passwords can not be changed. Currently all passwords will be hashed using SHA512-CRYPT.
+`mailctl` requires a Python 3 interpreter to run. This implementation relies on the database schema I use for my personal setup (available in`contrib/db_schema.sql`) but can be adjusted to other database designs as well. Config snippets to make this work with Postfix and Dovecot are included. I'm sure it can be used for other mail transfer agents or IMAP servers but I haven't tested that.
 
-The `passlib` module can be installed via your system's package manager
-or [pip](https://pypi.python.org/pypi/pip):
+Creation of user password hashes relies on the Python [passlib](https://pypi.python.org/pypi/passlib) module which is not part of the standard Python distribution. The script can be used without it, but then users can not be added and their passwords can not be changed. Currently all passwords will be hashed using SHA512-CRYPT.
 
-* Install `passlib` on Debian: `apt install python-passlib`  
+The `passlib` module can be installed using your system's package manager or [pip](https://pypi.python.org/pypi/pip):
+
+* Install `passlib` on Debian: `apt install python3-passlib`  
 * Install `passlib` using pip: `pip install passlib`
 
-The location of the SQLite database file containing the data to manage is hardcoded in `mailctl.py`.
-Please adjust constant `MailCtl.DB` to match your environment before using the script. 
+The location of the SQLite database file containing the data to manage is hardcoded in `mailctl.py`. Please adjust constant `MailCtl.DB` to match your environment before using the script.
 
 ## Usage
-Domains, users and aliases can be managed using subcommands. A help system is included.
+
+Domains, users and aliases can be managed using subcommands. A basic help system is included.
 
 Examples:
+
 ```bash
 # Add virtual domain sample.local
 $ mailctl.py domain add sample.local
