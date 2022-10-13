@@ -258,7 +258,7 @@ The most commonly used commands are:
 
     def add_user(self, username):
         """
-        Addd user to database
+        Add user to database
         """
 
         # Adding users requires passlib to create the password hash to be stored in database.abs
@@ -266,7 +266,7 @@ The most commonly used commands are:
             print("Adding users is not enabled because the passlib module is missing.")
             return False
 
-        # Check if user already exists before we add him twice
+        # Check if user already exists before we add them twice
         db_query = "SELECT email FROM virtual_users WHERE email = '{}'".format(username)
         result = self.db.query(db_query)
         if result.fetchone():
@@ -314,6 +314,52 @@ The most commonly used commands are:
             return True
         else:
             print('Failed to add user {}'.format(username))
+            return False
+
+    def change_password(self, username):
+        """
+        Generate new user password
+        """
+
+        # Adding users requires passlib to create the password hash to be stored in database.abs
+        if not PASSLIB_ENABLED:
+            print("Pasword update is not enabled because the passlib module is missing.")
+            return False
+
+        # Check if user exists
+        db_query = "SELECT email FROM virtual_users WHERE email = '{}'".format(username)
+        result = self.db.query(db_query)
+        if not result.fetchone():
+            print('User {} does not exist!'.format(username))
+            return False
+
+        # Create SHA512-Crypt password hash for this user
+        charsets = [
+            'abcdefghijklmnopqrstuvwxyz',
+            'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+            '0123456789',
+            '^!%&/()=?{[]}+~#-_.:,;<>',]
+        password_characters = []
+        charset = choice(charsets)
+        while len(password_characters) < 12:
+            password_characters.append(choice(charset))
+            charset = choice(list(set(charsets) - set([charset])))
+        password = "".join(password_characters)
+        password_hash = self._hash_password(password)
+
+        # Update user password
+        db_query = "UPDATE virtual_users "\
+                   "SET password = '{password}' "\
+                   "WHERE email = '{username}'"\
+                   .format(
+                       password=password_hash,
+                       username=username)
+        result = self.db.query(db_query)
+        if result.rowcount:
+            print('Changed {} password to {}'.format(username, password))
+            return True
+        else:
+            print('Failed to change {} password'.format(username))
             return False
 
     def delete_user(self, username):
@@ -573,6 +619,8 @@ The most commonly used commands are:
         parser_add.add_argument('username', help='user name')
         parser_delete = subparsers.add_parser('delete', help='delete user')
         parser_delete.add_argument('username', help='user name')
+        parser_passwd = subparsers.add_parser('password', help='change password')
+        parser_passwd.add_argument('username', help='user name')
 
         args = parser.parse_args(sys.argv[2:])
 
@@ -583,6 +631,9 @@ The most commonly used commands are:
                 sys.exit(1)
         elif args.subcommand == 'delete':
             if not self.delete_user(args.username):
+                sys.exit(1)
+        elif args.subcommand == 'password':
+            if not self.change_password(args.username):
                 sys.exit(1)
 
     def alias(self):
